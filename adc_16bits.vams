@@ -1,0 +1,63 @@
+//Verilog-AMS HDL for "tirunels_design", "veri_adc" "verilogams"
+
+`include "constants.vams"
+`include "disciplines.vams"
+
+module veri_adc(out,in,clk);
+
+parameter integer bits = 16 from [1:24]; //Default 8 bit
+parameter real fullscale = 1.0; // output range is from 0 - 1V
+parameter real td = 0p;
+parameter real tt =10p;
+parameter vdd = 1.0;
+parameter real thresh = vdd /2;
+parameter integer dir = 1 from [-1:1] exclude 0;
+
+output [bits-1:0]out;
+electrical [bits-1:0]out;
+integer k,outvar[bits-1:0];
+input clk;
+input in;
+electrical in, clk;
+
+real ain;
+integer weight;
+genvar i;
+
+analog begin
+   
+   @(initial_step)
+     begin 
+           outvar[bits-1] = 1'b1;
+        for(k=bits-2;k>=0;k=k-1)
+          begin
+            outvar[k] = 1'b0;
+        end
+     end   
+
+  @(cross(V(clk) - thresh, dir))  
+     begin
+               ain = V(in);
+       for(i = bits-1;i>=0;i=i-1)
+         begin
+           if(ain > thresh)
+             begin
+              outvar[i] = 1;
+              ain = ain - thresh;
+             end
+           else
+             begin
+              outvar[i] = 0;
+            end
+           ain = 2*ain;
+         end 
+ 
+ 
+          end
+     for(i = bits-1;i>=0;i=i-1)
+       begin
+           V(out[i]) <+ transition(outvar[i]*vdd,td,tt);
+       end
+end
+endmodule
+

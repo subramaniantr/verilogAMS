@@ -1,0 +1,109 @@
+//Verilog-AMS HDL for "Vmodels", "dco" "verilogams"
+// Modified Subramanian T R
+
+
+`define PI 3.14159265358979323846264338327950288419716939937511
+`include "constants.vams"
+`include "disciplines.vams"
+`timescale 1ns/1fs
+
+module veri_inv_noise (dco_out, vctrl, vnoise, inv_in);
+
+
+        input vctrl; // Analog control code
+	electrical vctrl;
+ 
+        input vnoise;
+	electrical vnoise;
+
+	input inv_in; 
+	
+	parameter real noise_acc_dbc = -100;	// DCO FM noise @ fos (single-sideband)
+	parameter real fos = 1M;		
+	parameter real noise_white_dbc = -125;	// DCO PM noise (single-sideband)
+        parameter integer pn_en = 1 from [0,1];             // phase noise enable(1), disable(0)
+        parameter real freq = 2.5G;	// DCO output frequency
+        parameter real Kdco = 10e-6;	// DCO gain (ppm/LSB)
+        parameter real Knoise = 10e-6;	// DCO gain (ppm/LSB)
+
+        output dco_out;         // DCO output clk
+        reg dco_out;
+
+        reg dco_out_ideal;
+        reg dco_out_jitt;
+ 
+        //Delay variables
+	real nom_delay;
+        real ideal_delay;
+        real jitt_delay;
+
+        //Std Deviation FM and PM jitter
+	real fm_jitt_std;
+	real pm_jitt_std;
+
+        //delay variables for PM and FM
+        real fm_del;
+        real pm_del_2;
+        real pm_del;
+
+        integer seed1 = -311;   
+        integer seed2 = -561;   
+        integer file;
+	real i;
+	real j;
+	
+        initial begin
+                dco_out         = 1'b0;
+                dco_out_ideal   = 1'b0;
+                dco_out_jitt    = 1'b0;
+		nom_delay	= 1/freq*1e9/2;
+                ideal_delay     = nom_delay;
+                jitt_delay      = nom_delay;
+
+		if (noise_acc_dbc != 0)	
+   		fm_jitt_std	= fos*sqrt(10**(noise_acc_dbc/10)/(freq**3))*1e9; // FM jitter (period jitter std)(READ KEN KUNDERT'S MODELLING OF JITTER)
+		else
+		fm_jitt_std	= 0;
+
+		if (noise_white_dbc != 0)	
+		pm_jitt_std 	= sqrt(10**(noise_white_dbc/10)/freq)/2/`PI*1e9;  // PM jitter (period jitter std)
+		else
+		pm_jitt_std	= 0;
+
+
+                fm_del          = 0;
+                pm_del          = 0;
+                pm_del_2        = 0;
+	        file            = $fopen("/srv/scratch/simulation_tanand3/MDLL/jitter.csv","w");
+        end
+
+        always @(posedge dco_out) begin
+                i = V(vctrl);
+		j = V(vnoise);
+		ideal_delay = nom_delay * (1 + i*Kdco + j*Knoise);  //IDEAL DELAY = NOMDELAY(1+ VctrlxKdco + VnoisexKnoise) 
+        end
+
+        always @(negedge dco_out_jitt) begin                                    // accumulating jitter modeling
+                pm_del_2 = pm_del;
+                pm_del = pm_jitt_std/2*$dist_normal(seed1,0,1000000)*1e-6;
+                fm_del = fm_jitt_std/2*$dist_normal(seed2,0,1000000)*1e-6;      // divided by 2 for half period  
+                jitt_delay = ideal_delay + pm_del - pm_del_2 + fm_del;
+        end
+
+        always @(inv_in) begin
+		dco_out_ideal <= #ideal_delay ~inv_in;
+		dco_out_jitt  <= #jitt_delay ~inv_in;
+	end
+
+        always @(posedge dco_out) begin 
+                $fwrite(file,"%f\n",$realtime);
+        end
+
+        always @(pn_en, dco_out_ideal, dco_out_jitt)    begin
+                if (pn_en)
+                       dco_out <= dco_out_ideal;
+                 else
+                      dco_out <= dco_out_jitt;
+        end
+
+endmodule
